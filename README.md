@@ -1,4 +1,4 @@
-# YApp CI/CD Pipeline
+# HamBurger CI/CD Pipeline
 
 ## Overview
 
