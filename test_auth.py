@@ -1,33 +1,42 @@
-import unittest
-from auth import app, users_db
-import bcrypt
-from jose import jwt
+import pytest
+from auth import app
+from flask import json
 
-class AuthTestCase(unittest.TestCase):
-    def setUp(self):
-        self.app = app.test_client()
-        self.app.testing = True
-        users_db.clear()  # Clear user database before each test
+@pytest.fixture
+def client():
+    with app.test_client() as client:
+        yield client
 
-    def test_signup_success(self):
-        response = self.app.post('/signup', json={'email': 'test@example.com', 'password': 'testpass'})
-        self.assertEqual(response.status_code, 201)
+# Test signup functionality
+def test_signup(client):
+    # Test a successful signup
+    response = client.post('/signup', json={'email': 'test@example.com', 'password': 'testpassword'})
+    assert response.status_code == 201
+    assert response.json['message'] == 'User created'
 
-    def test_signup_existing_user(self):
-        users_db['test@example.com'] = bcrypt.hashpw(b'testpass', bcrypt.gensalt())
-        response = self.app.post('/signup', json={'email': 'test@example.com', 'password': 'testpass'})
-        self.assertEqual(response.status_code, 400)
+    # Test signing up an existing user
+    response = client.post('/signup', json={'email': 'test@example.com', 'password': 'testpassword'})
+    assert response.status_code == 400
+    assert response.json['message'] == 'User already exists'
 
-    def test_login_success(self):
-        password = 'testpass'
-        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-        users_db['test@example.com'] = hashed_password
-        response = self.app.post('/login', json={'email': 'test@example.com', 'password': password})
-        self.assertEqual(response.status_code, 200)
+# Test login functionality
+def test_login(client):
+    # Sign up a user first
+    client.post('/signup', json={'email': 'test2@example.com', 'password': 'testpassword'})
+    
+    # Test successful login
+    response = client.post('/login', json={'email': 'test2@example.com', 'password': 'testpassword'})
+    assert response.status_code == 200
+    assert 'token' in response.json
 
-    def test_login_failure(self):
-        response = self.app.post('/login', json={'email': 'test@example.com', 'password': 'wrongpass'})
-        self.assertEqual(response.status_code, 401)
+    # Test login failure
+    response = client.post('/login', json={'email': 'test2@example.com', 'password': 'wrongpassword'})
+    assert response.status_code == 401
+    assert response.json['message'] == 'Invalid credentials'
 
-if __name__ == '__main__':
-    unittest.main()
+# Test logout functionality
+def test_logout(client):
+    # Test a successful logout
+    response = client.post('/logout')
+    assert response.status_code == 200
+    assert response.json['message'] == 'Logged out'

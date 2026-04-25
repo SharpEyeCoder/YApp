@@ -1,57 +1,66 @@
-import unittest
-from flask import Flask
+import pytest
+from flask import json
+from models import session, User
 from views import yapp
-from models import session, User, Post
+from flask import Flask
 
-class ViewsTestCase(unittest.TestCase):
-    def setUp(self):
-        self.app = Flask(__name__)
-        self.app.register_blueprint(yapp)
-        self.client = self.app.test_client()
+app = Flask(__name__)
+app.register_blueprint(yapp)
 
-        session.query(Post).delete()
-        session.query(User).delete()
-        session.commit()
+@pytest.fixture
+def client():
+    with app.test_client() as client:
+        yield client
+    session.rollback()
 
-        # Add a test user
-        self.user = User(email='user@example.com', password='hashedpassword')
-        session.add(self.user)
-        session.commit()
+@pytest.fixture(autouse=True)
+def setup_db():
+    # Ensure a clean start
+    User.__table__.drop(session.bind, checkfirst=True)
+    User.__table__.create(session.bind)
 
-    def tearDown(self):
-        session.query(Post).delete()
-        session.query(User).delete()
-        session.commit()
+# Test creating a post
+def test_create_post(client):
+    # Setup user
+    user = User(email='post@example.com', password='hashedpassword')
+    session.add(user)
+    session.commit()
 
-    def test_create_post_success(self):
-        response = self.client.post('/posts', json={'user_id': self.user.id, 'content': 'New Post Content'})
-        self.assertEqual(response.status_code, 201)
+    # Test creating a post
+    response = client.post('/posts', json={'user_id': user.id, 'content': 'This is a new post'})
+    assert response.status_code == 201
+    assert response.json['message'] == 'Post created'
 
-    def test_create_post_user_not_found(self):
-        response = self.client.post('/posts', json={'user_id': 999, 'content': 'New Post Content'})
-        self.assertEqual(response.status_code, 404)
+    # Test creating a post for non-existent user
+    response = client.post('/posts', json={'user_id': 9999, 'content': 'Invalid user post'})
+    assert response.status_code == 404
+    assert response.json['message'] == 'User not found'
 
-    def test_list_posts(self):
-        post = Post(user_id=self.user.id, content='Another Post')
-        session.add(post)
-        session.commit()
+# Test listing posts
+def test_list_posts(client):
+    user = User(email='poster@example.com', password='hashedpassword')
+    session.add(user)
+    session.commit()
 
-        response = self.client.get('/posts')
-        self.assertEqual(response.status_code, 200)
-        data = response.get_json()
-        self.assertTrue(len(data) > 0)
+    client.post('/posts', json={'user_id': user.id, 'content': 'Post for listing'})
 
-    def test_delete_post_success(self):
-        post = Post(user_id=self.user.id, content='Post to delete')
-        session.add(post)
-        session.commit()
+    response = client.get('/posts')
+    assert response.status_code == 200
+    assert len(response.json) == 1
 
-        response = self.client.delete(f'/posts/{post.id}')
-        self.assertEqual(response.status_code, 200)
+# Test deleting a post
+def test_delete_post(client):
+    user = User(email='delete@example.com', password='hashedpassword')
+    session.add(user)
+    session.commit()
 
-    def test_delete_post_not_found(self):
-        response = self.client.delete('/posts/999')
-        self.assertEqual(response.status_code, 404)
+    post_response = client.post('/posts', json={'user_id': user.id, 'content': 'Post to delete'})
+    post_id = post_response.json['id']
 
-if __name__ == '__main__':
-    unittest.main()
+    response = client.delete(f'/posts/{post_id}')
+    assert response.status_code == 200
+    assert response.json['message'] == 'Post deleted'
+
+    response = client.delete(f'/posts/{post_id}')
+    assert response.status_code == 404
+    assert response.json['message'] == 'Post not found'
