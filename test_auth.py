@@ -2,6 +2,7 @@ import pytest
 from flask import Flask
 from auth import app, users_db
 import json
+import bcrypt
 
 @pytest.fixture
 def client():
