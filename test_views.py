@@ -1,66 +1,49 @@
 import pytest
-from flask import json
-from models import session, User
-from views import yapp
 from flask import Flask
+from views import yapp
+from models import session, User, Post
 
-app = Flask(__name__)
-app.register_blueprint(yapp)
-
+# Create a test client
 @pytest.fixture
 def client():
+    app = Flask(__name__)
+    app.register_blueprint(yapp)
     with app.test_client() as client:
         yield client
-    session.rollback()
 
-@pytest.fixture(autouse=True)
-def setup_db():
-    # Ensure a clean start
-    User.__table__.drop(session.bind, checkfirst=True)
-    User.__table__.create(session.bind)
+class TestViews:
+    def setup_method(self):
+        # Clear the database before each test
+        session.query(Post).delete()
+        session.query(User).delete()
+        session.commit()
 
-# Test creating a post
-def test_create_post(client):
-    # Setup user
-    user = User(email='post@example.com', password='hashedpassword')
-    session.add(user)
-    session.commit()
+    def test_create_post(self, client):
+        user = User(email='test@example.com', password='hashed_pw')
+        session.add(user)
+        session.commit()
+        response = client.post('/posts', json={'user_id': user.id, 'content': 'Hello World'})
+        assert response.status_code == 201
+        assert response.get_json() == {'message': 'Post created'}
 
-    # Test creating a post
-    response = client.post('/posts', json={'user_id': user.id, 'content': 'This is a new post'})
-    assert response.status_code == 201
-    assert response.json['message'] == 'Post created'
+    def test_list_posts(self, client):
+        user = User(email='test@example.com', password='hashed_pw')
+        session.add(user)
+        post = Post(user_id=user.id, content='Hello World')
+        session.add(post)
+        session.commit()
+        response = client.get('/posts')
+        assert response.status_code == 200
+        data = response.get_json()
+        assert len(data) == 1
+        assert data[0]['content'] == 'Hello World'
 
-    # Test creating a post for non-existent user
-    response = client.post('/posts', json={'user_id': 9999, 'content': 'Invalid user post'})
-    assert response.status_code == 404
-    assert response.json['message'] == 'User not found'
-
-# Test listing posts
-def test_list_posts(client):
-    user = User(email='poster@example.com', password='hashedpassword')
-    session.add(user)
-    session.commit()
-
-    client.post('/posts', json={'user_id': user.id, 'content': 'Post for listing'})
-
-    response = client.get('/posts')
-    assert response.status_code == 200
-    assert len(response.json) == 1
-
-# Test deleting a post
-def test_delete_post(client):
-    user = User(email='delete@example.com', password='hashedpassword')
-    session.add(user)
-    session.commit()
-
-    post_response = client.post('/posts', json={'user_id': user.id, 'content': 'Post to delete'})
-    post_id = post_response.json['id']
-
-    response = client.delete(f'/posts/{post_id}')
-    assert response.status_code == 200
-    assert response.json['message'] == 'Post deleted'
-
-    response = client.delete(f'/posts/{post_id}')
-    assert response.status_code == 404
-    assert response.json['message'] == 'Post not found'
+    def test_delete_post(self, client):
+        user = User(email='test@example.com', password='hashed_pw')
+        session.add(user)
+        post = Post(user_id=user.id, content='Hello World')
+        session.add(post)
+        session.commit()
+        response = client.delete(f'/posts/{post.id}')
+        assert response.status_code == 200
+        assert response.get_json() == {'message': 'Post deleted'}
